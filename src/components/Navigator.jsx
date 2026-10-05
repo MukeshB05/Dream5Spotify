@@ -1,4 +1,7 @@
-import { GoHome, GoHomeFill } from "react-icons/go";
+import {
+  GoHome,
+  GoHomeFill,
+} from "react-icons/go";
 import {
   IoHeartOutline,
   IoHeartSharp,
@@ -9,9 +12,11 @@ import {
 } from "react-icons/ri";
 import { MdLiveTv } from "react-icons/md";
 import { FaSpotify } from "react-icons/fa";
-
-import { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import {
+  Link,
+  useLocation,
+} from "react-router-dom";
 
 const Navigator = () => {
   const location = useLocation();
@@ -25,52 +30,27 @@ const Navigator = () => {
   const [wakeLock, setWakeLock] =
     useState(null);
 
-  // ============================================================
-  // LIVE TV MODAL
-  // ============================================================
-
-  const openTVModal = () => {
-    setShowTVModal(true);
-    setWakeLockStatus("Active");
-  };
-
-  const closeTVModal = () => {
-    setShowTVModal(false);
-
-    if (wakeLock) {
-      wakeLock.release();
-      setWakeLock(null);
-      setWakeLockStatus("Inactive");
-    }
-  };
-
-  // ============================================================
-  // SCREEN WAKE LOCK
-  // ============================================================
-
   const requestWakeLock = async () => {
     try {
-      if ("wakeLock" in navigator) {
-        const lock =
-          await navigator.wakeLock.request(
-            "screen"
-          );
-
-        setWakeLock(lock);
-        setWakeLockStatus("Active");
-
-        lock.addEventListener(
-          "release",
-          () => {
-            setWakeLockStatus("Inactive");
-            setWakeLock(null);
-          }
-        );
-      } else {
-        setWakeLockStatus(
-          "Not Supported"
-        );
+      if (!("wakeLock" in navigator)) {
+        setWakeLockStatus("Not Supported");
+        return;
       }
+
+      const lock =
+        await navigator.wakeLock.request(
+          "screen"
+        );
+
+      setWakeLock(lock);
+      setWakeLockStatus("Active");
+
+      lock.addEventListener(
+        "release",
+        () => {
+          setWakeLockStatus("Inactive");
+        }
+      );
     } catch (error) {
       console.error(
         "Wake Lock request failed:",
@@ -81,28 +61,33 @@ const Navigator = () => {
     }
   };
 
-  // ============================================================
-  // LIVE TV CLICK
-  // ============================================================
+  const releaseWakeLock = () => {
+    if (!wakeLock) return;
 
-  const handleLiveTvClick = () => {
-    requestWakeLock();
-    openTVModal();
+    wakeLock.release();
+    setWakeLock(null);
+    setWakeLockStatus("Inactive");
   };
 
-  // ============================================================
-  // RESTORE WAKE LOCK AFTER TAB VISIBILITY
-  // ============================================================
+  const openTVModal = async () => {
+    await requestWakeLock();
+    setShowTVModal(true);
+  };
+
+  const closeTVModal = () => {
+    setShowTVModal(false);
+    releaseWakeLock();
+  };
 
   useEffect(() => {
-    const handleVisibilityChange = () => {
+    const handleVisibilityChange = async () => {
       if (
         document.visibilityState ===
           "visible" &&
         showTVModal &&
         !wakeLock
       ) {
-        requestWakeLock();
+        await requestWakeLock();
       }
     };
 
@@ -117,76 +102,47 @@ const Navigator = () => {
         handleVisibilityChange
       );
     };
-  }, [wakeLock, showTVModal]);
-
-  // ============================================================
-  // ACTIVE ROUTE
-  // ============================================================
-
-  const isHome =
-    location.pathname === "/";
-
-  const isPlaylist =
-    location.pathname === "/Playlist";
-
-  const isFavourite =
-    location.pathname === "/Favourite";
-
-  const isSpotifyImport =
-    location.pathname ===
-    "/spotify-import";
-
-  // ============================================================
-  // UI
-  // ============================================================
+  }, [showTVModal, wakeLock]);
 
   return (
     <>
-      {/* ======================================================
+      {/* ================================
           MOBILE BOTTOM NAVIGATION
-      ======================================================= */}
-
-      <div
+      ================================= */}
+      <nav
         className="
           lg:hidden
           fixed
           bottom-0
-          z-20
+          left-0
+          right-0
+          z-40
+          h-[3.8rem]
           w-full
-          Navigator
-          h-[3.6rem]
-          lg:h-[3.5rem]
           flex
           items-center
           justify-around
           bg-white
+          dark:bg-black
           border-t
           border-gray-200
+          dark:border-gray-800
+          shadow-[0_-2px_10px_rgba(0,0,0,0.08)]
         "
       >
-        {/* ====================================================
-            HOME
-        ===================================================== */}
-
+        {/* HOME */}
         <Link
           to="/"
-          aria-label="Home"
-          className="flex-1"
+          className="flex-1 h-full"
         >
           <div
-            className={`
-              flex
-              flex-col
-              items-center
-              text-sm
-              ${
-                isHome
-                  ? "text-green-500"
-                  : ""
-              }
-            `}
+            className={`h-full flex flex-col items-center justify-center text-xs ${
+              location.pathname === "/"
+                ? "text-green-500"
+                : ""
+            }`}
           >
-            {isHome ? (
+            {location.pathname === "/" ? (
               <GoHomeFill className="text-2xl" />
             ) : (
               <GoHome className="text-2xl" />
@@ -196,29 +152,19 @@ const Navigator = () => {
           </div>
         </Link>
 
-        {/* ====================================================
-            PLAYLIST
-        ===================================================== */}
-
+        {/* PLAYLIST */}
         <Link
           to="/Playlist"
-          aria-label="Playlist"
-          className="flex-1"
+          className="flex-1 h-full"
         >
           <div
-            className={`
-              flex
-              flex-col
-              items-center
-              text-sm
-              ${
-                isPlaylist
-                  ? "text-green-500"
-                  : ""
-              }
-            `}
+            className={`h-full flex flex-col items-center justify-center text-xs ${
+              location.pathname === "/Playlist"
+                ? "text-green-500"
+                : ""
+            }`}
           >
-            {isPlaylist ? (
+            {location.pathname === "/Playlist" ? (
               <RiFolderMusicFill className="text-2xl" />
             ) : (
               <RiFolderMusicLine className="text-2xl" />
@@ -228,29 +174,19 @@ const Navigator = () => {
           </div>
         </Link>
 
-        {/* ====================================================
-            FAVOURITE
-        ===================================================== */}
-
+        {/* FAVOURITE */}
         <Link
           to="/Favourite"
-          aria-label="Favourite"
-          className="flex-1"
+          className="flex-1 h-full"
         >
           <div
-            className={`
-              flex
-              flex-col
-              items-center
-              text-sm
-              ${
-                isFavourite
-                  ? "text-green-500"
-                  : ""
-              }
-            `}
+            className={`h-full flex flex-col items-center justify-center text-xs ${
+              location.pathname === "/Favourite"
+                ? "text-green-500"
+                : ""
+            }`}
           >
-            {isFavourite ? (
+            {location.pathname === "/Favourite" ? (
               <IoHeartSharp className="text-2xl" />
             ) : (
               <IoHeartOutline className="text-2xl" />
@@ -260,82 +196,59 @@ const Navigator = () => {
           </div>
         </Link>
 
-        {/* ====================================================
-            SPOTIFY IMPORT
-            Immediately after Favourite
-
-            Description:
-            Import Spotify tracks, albums and
-            playlists into your queue.
-        ===================================================== */}
-
+        {/* SPOTIFY */}
         <Link
           to="/spotify-import"
-          aria-label="Import Spotify tracks, albums and playlists into your queue"
-          title="Import Spotify tracks, albums and playlists into your queue"
-          className="flex-1"
+          className="flex-1 h-full"
+          aria-label="Import Spotify tracks, albums and playlists"
+          title="Import Spotify tracks, albums and playlists"
         >
           <div
-            className={`
-              flex
-              flex-col
-              items-center
-              text-sm
-              ${
-                isSpotifyImport
-                  ? "text-green-500"
-                  : ""
-              }
-            `}
+            className={`h-full flex flex-col items-center justify-center text-xs ${
+              location.pathname ===
+              "/spotify-import"
+                ? "text-green-500"
+                : ""
+            }`}
           >
             <FaSpotify className="text-2xl" />
-
             <span>Spotify</span>
           </div>
         </Link>
 
-        {/* ====================================================
-            LIVE TV
-        ===================================================== */}
-
+        {/* LIVE TV */}
         <button
           type="button"
-          onClick={handleLiveTvClick}
-          className="
-            flex-1
-            relative
-            flex
-            flex-col
-            items-center
-            text-sm
-          "
-          aria-label="Live TV"
+          onClick={openTVModal}
+          className="flex-1 h-full"
+          aria-label="Open Live TV"
         >
-          <div className="flex items-center space-x-1">
+          <div
+            className="
+              h-full
+              flex
+              flex-col
+              items-center
+              justify-center
+              text-xs
+            "
+          >
             <MdLiveTv className="text-2xl" />
 
-            {wakeLockStatus ===
-              "Active" && (
-              <span
-                className="
-                  text-[9px]
-                  text-green-500
-                  font-semibold
-                "
-              >
+            <span>Live TV</span>
+
+            {wakeLockStatus === "Active" && (
+              <span className="text-[8px] text-green-500">
                 Active
               </span>
             )}
           </div>
-
-          <span>Live TV</span>
         </button>
-      </div>
+      </nav>
 
-      {/* ======================================================
+      {/* ================================
           LIVE TV MODAL
-      ======================================================= */}
-
+      ================================= */}
       {showTVModal && (
         <div
           className="
@@ -345,8 +258,7 @@ const Navigator = () => {
             flex
             items-center
             justify-center
-            bg-black
-            bg-opacity-75
+            bg-black/80
           "
         >
           <div
@@ -355,43 +267,34 @@ const Navigator = () => {
               w-full
               h-full
               max-w-4xl
-              max-h-[80vh]
+              max-h-[85vh]
               bg-black
             "
           >
-            {/* Close */}
             <button
               type="button"
+              onClick={closeTVModal}
               className="
                 absolute
                 -top-10
                 right-0
+                z-50
+                px-3
+                py-2
                 text-white
-                text-2xl
-                z-10
-                p-2
+                text-lg
               "
-              onClick={closeTVModal}
-              aria-label="Close Live TV"
             >
               × Close
             </button>
 
-            {/* Live TV */}
             <iframe
               src="https://dreamplay.pages.dev/"
-              className="
-                w-full
-                h-full
-                border-none
-              "
               title="Dreamly5 Live TV"
+              className="w-full h-full border-none"
               allowFullScreen
               frameBorder="0"
               scrolling="yes"
-              style={{
-                overflow: "hidden",
-              }}
             />
           </div>
         </div>
