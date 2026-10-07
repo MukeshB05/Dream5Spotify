@@ -116,7 +116,7 @@ const sanitizeMetadata = (value, fallback = "") =>
 const stripMediaExtensions = (value) =>
   sanitizeMetadata(value, "")
     .replace(
-      /(?:\\.(?:mp3|m4a|aac|flac|wav|ogg|oga|opus|webm|mp4))+$/i,
+      /(?:\.(?:mp3|m4a|aac|flac|wav|ogg|oga|opus|webm|mp4))+$/i,
       ""
     )
     .trim();
@@ -165,7 +165,6 @@ const embedWithCover = async (
       "0:a:0",
       "-map",
       "1:v:0",
-      "-vn",
       "-c:a",
       "libmp3lame",
       "-b:a",
@@ -263,6 +262,83 @@ const embedWithCover = async (
   return result;
 };
 
+
+/* =========================================================
+   DOWNLOAD FORMATTERS
+========================================================= */
+
+const formatDownloadSize = (bytes) => {
+  const value = Number(bytes) || 0;
+
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  const units = [
+    "KB",
+    "MB",
+    "GB",
+  ];
+
+  let size = value / 1024;
+  let index = 0;
+
+  while (
+    size >= 1024 &&
+    index < units.length - 1
+  ) {
+    size /= 1024;
+    index += 1;
+  }
+
+  return `${size.toFixed(
+    size >= 100 ? 0 : 1
+  )} ${units[index]}`;
+};
+
+const formatDownloadClock = (seconds) => {
+  const value = Math.max(
+    0,
+    Math.floor(
+      Number(seconds) || 0
+    )
+  );
+
+  const minutes = Math.floor(
+    value / 60
+  );
+
+  const remaining =
+    value % 60;
+
+  if (minutes >= 60) {
+    const hours = Math.floor(
+      minutes / 60
+    );
+
+    const mins =
+      minutes % 60;
+
+    return `${String(hours).padStart(
+      2,
+      "0"
+    )}:${String(mins).padStart(
+      2,
+      "0"
+    )}:${String(remaining).padStart(
+      2,
+      "0"
+    )}`;
+  }
+
+  return `${String(minutes).padStart(
+    2,
+    "0"
+  )}:${String(remaining).padStart(
+    2,
+    "0"
+  )}`;
+};
 
 /* =========================================================
    SAFE DECODE
@@ -511,6 +587,36 @@ const Player = () => {
   const [isDownloading, setIsDownloading] =
     useState(false);
 
+  const [downloadProgress, setDownloadProgress] =
+    useState(0);
+
+  const [downloadBytes, setDownloadBytes] =
+    useState(0);
+
+  const [downloadTotalBytes, setDownloadTotalBytes] =
+    useState(0);
+
+  const [downloadElapsed, setDownloadElapsed] =
+    useState(0);
+
+  const [downloadEta, setDownloadEta] =
+    useState(0);
+
+  const [downloadStatus, setDownloadStatus] =
+    useState("");
+
+  const [downloadError, setDownloadError] =
+    useState("");
+
+  const downloadStartedAtRef =
+    useRef(0);
+
+  const downloadBytesRef =
+    useRef(0);
+
+  const downloadTotalBytesRef =
+    useRef(0);
+
   /* =======================================================
      LIKED SONGS
   ======================================================= */
@@ -545,6 +651,55 @@ const Player = () => {
 
   const lyricContainerRef =
     useRef(null);
+
+  useEffect(() => {
+    if (!isDownloading) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      const started =
+        downloadStartedAtRef.current;
+
+      if (!started) {
+        return;
+      }
+
+      const elapsed =
+        Math.max(
+          0,
+          (Date.now() - started) / 1000
+        );
+
+      setDownloadElapsed(elapsed);
+
+      const loaded =
+        downloadBytesRef.current;
+
+      const total =
+        downloadTotalBytesRef.current;
+
+      if (
+        loaded > 0 &&
+        total > loaded &&
+        elapsed > 0
+      ) {
+        const speed =
+          loaded / elapsed;
+
+        setDownloadEta(
+          speed > 0
+            ? (total - loaded) / speed
+            : 0
+        );
+      } else {
+        setDownloadEta(0);
+      }
+    }, 500);
+
+    return () =>
+      window.clearInterval(timer);
+  }, [isDownloading]);
 
   /* =======================================================
      AUDIO
@@ -1420,7 +1575,10 @@ const Player = () => {
       currentSong?.downloadUrl;
 
     if (!url) {
-      alert("Download URL is not available.");
+      setDownloadError(
+        "Download URL is not available."
+      );
+      setDownloadStatus("Download failed");
       return;
     }
 
@@ -1479,8 +1637,11 @@ const Player = () => {
       `${safeFilename(title)} - ${safeFilename(artist)}.mp3`;
 
     const downloadBlob = (blob, name) => {
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
+      const objectUrl =
+        URL.createObjectURL(blob);
+
+      const link =
+        document.createElement("a");
 
       link.href = objectUrl;
       link.download = name;
@@ -1492,19 +1653,22 @@ const Player = () => {
 
       window.setTimeout(() => {
         URL.revokeObjectURL(objectUrl);
-      }, 1500);
+      }, 2000);
     };
 
-    const getDownloadResourceUrl = (resourceUrl) => {
+    const getDownloadResourceUrl = (
+      resourceUrl
+    ) => {
       if (!resourceUrl) {
         return "";
       }
 
       try {
-        const parsed = new URL(
-          resourceUrl,
-          window.location.href
-        );
+        const parsed =
+          new URL(
+            resourceUrl,
+            window.location.href
+          );
 
         if (
           parsed.origin ===
@@ -1521,27 +1685,39 @@ const Player = () => {
       }
     };
 
-    const fetchBytes = async (resourceUrl) => {
+    const fetchBytes = async (
+      resourceUrl,
+      statusText
+    ) => {
       if (!resourceUrl) {
         throw new Error(
           "Resource URL is empty."
         );
       }
 
+      setDownloadStatus(
+        statusText
+      );
+      setDownloadProgress(0);
+      setDownloadBytes(0);
+      setDownloadTotalBytes(0);
+      setDownloadEta(0);
+
       const proxyUrl =
         getDownloadResourceUrl(
           resourceUrl
         );
 
-      const response = await fetch(
-        proxyUrl,
-        {
-          method: "GET",
-          credentials:
-            "same-origin",
-          cache: "no-store",
-        }
-      );
+      const response =
+        await fetch(
+          proxyUrl,
+          {
+            method: "GET",
+            credentials:
+              "same-origin",
+            cache: "no-store",
+          }
+        );
 
       if (!response.ok) {
         throw new Error(
@@ -1549,30 +1725,153 @@ const Player = () => {
         );
       }
 
-      const buffer =
-        await response.arrayBuffer();
+      const total =
+        Number(
+          response.headers.get(
+            "content-length"
+          )
+        ) || 0;
 
-      if (!buffer.byteLength) {
+      downloadBytesRef.current = 0;
+      downloadTotalBytesRef.current =
+        total;
+
+      setDownloadTotalBytes(
+        total
+      );
+
+      if (
+        !response.body ||
+        typeof response.body.getReader !==
+          "function"
+      ) {
+        const buffer =
+          new Uint8Array(
+            await response.arrayBuffer()
+          );
+
+        downloadBytesRef.current =
+          buffer.byteLength;
+
+        setDownloadBytes(
+          buffer.byteLength
+        );
+
+        setDownloadProgress(
+          total > 0
+            ? 100
+            : 100
+        );
+
+        return buffer;
+      }
+
+      const reader =
+        response.body.getReader();
+
+      const chunks = [];
+      let loaded = 0;
+
+      while (true) {
+        const { done, value } =
+          await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        if (value?.length) {
+          chunks.push(value);
+          loaded += value.length;
+
+          downloadBytesRef.current =
+            loaded;
+
+          setDownloadBytes(
+            loaded
+          );
+
+          setDownloadProgress(
+            total > 0
+              ? Math.min(
+                  100,
+                  (loaded /
+                    total) *
+                    100
+                )
+              : 0
+          );
+        }
+      }
+
+      const result =
+        new Uint8Array(
+          loaded
+        );
+
+      let offset = 0;
+
+      for (const chunk of chunks) {
+        result.set(
+          chunk,
+          offset
+        );
+        offset += chunk.length;
+      }
+
+      if (!result.length) {
         throw new Error(
           "Downloaded media is empty."
         );
       }
 
-      return new Uint8Array(buffer);
+      return result;
     };
+
+    const setStage = (status, progress) => {
+      setDownloadStatus(status);
+      setDownloadProgress(
+        Math.max(
+          0,
+          Math.min(
+            100,
+            Number(progress) || 0
+          )
+        )
+      );
+    };
+
+    setDownloadError("");
+    setDownloadProgress(0);
+    setDownloadBytes(0);
+    setDownloadTotalBytes(0);
+    setDownloadElapsed(0);
+    setDownloadEta(0);
+    setDownloadStatus(
+      "Starting download..."
+    );
+
+    downloadStartedAtRef.current =
+      Date.now();
+
+    downloadBytesRef.current = 0;
+    downloadTotalBytesRef.current = 0;
 
     setIsDownloading(true);
 
-    let ff = null;
-
     try {
       /*
-       * Download the source first. The proxy prevents mobile browsers
-       * from being blocked by JioSaavn CDN CORS rules.
+       * AUDIO
        */
       const audioData =
-        await fetchBytes(url);
+        await fetchBytes(
+          url,
+          "Downloading audio..."
+        );
 
+      /*
+       * ARTWORK
+       */
       let coverData = null;
 
       if (
@@ -1582,71 +1881,127 @@ const Player = () => {
         try {
           coverData =
             await fetchBytes(
-              artwork
+              artwork,
+              "Downloading artwork..."
             );
         } catch (coverError) {
-          /*
-           * Artwork is optional. Never make the whole MP3 download
-           * fail because an image CDN is unavailable.
-           */
           console.warn(
-            "Cover download failed:",
+            "Cover download failed. Continuing without artwork:",
             coverError
           );
-          coverData = null;
+
+          setDownloadStatus(
+            "Artwork unavailable — continuing..."
+          );
+
+          setDownloadProgress(0);
+          setDownloadBytes(0);
+          setDownloadTotalBytes(0);
         }
       }
 
-      ff = await getFFmpeg();
-
-      const metadata = {
-        title,
-        artist,
-        albumArtist,
-        album,
-        year,
-        publisher,
-        copyright,
-      };
-
       /*
-       * First attempt:
-       * 320 kbps MP3 + embedded cover + ID3 metadata.
-       *
-       * Mobile WebAssembly builds can fail when attaching the artwork
-       * to some M4A/AAC sources, so we have a second conversion path.
+       * FFMPEG
        */
+      setStage(
+        "Preparing 320 kbps MP3...",
+        0
+      );
+
+      const ff =
+        await getFFmpeg();
+
+      const onFfmpegProgress =
+        ({ progress: ffProgress }) => {
+          const percent =
+            Math.max(
+              0,
+              Math.min(
+                100,
+                Math.round(
+                  (Number(
+                    ffProgress
+                  ) || 0) * 100
+                )
+              )
+            );
+
+          setDownloadStatus(
+            `Converting to 320 kbps MP3... ${percent}%`
+          );
+
+          setDownloadProgress(
+            percent
+          );
+        };
+
+      ff.on(
+        "progress",
+        onFfmpegProgress
+      );
+
       let taggedData;
 
       try {
-        taggedData =
-          await embedWithCover(
-            ff,
-            audioData,
-            coverData,
-            metadata
-          );
-      } catch (coverConversionError) {
-        console.warn(
-          "MP3 conversion with artwork failed. Retrying without artwork:",
-          coverConversionError
-        );
-
         /*
-         * Second attempt:
-         * force audio-only MP3 conversion.
-         *
-         * This is deliberately a fresh call with coverData=null.
-         * It handles the mobile case where image decoding/muxing
-         * causes FFmpeg to run out of memory or reject the cover.
+         * First attempt:
+         * 320 kbps MP3 + embedded album artwork.
          */
         taggedData =
           await embedWithCover(
             ff,
             audioData,
-            null,
-            metadata
+            coverData,
+            {
+              title,
+              artist,
+              albumArtist,
+              album,
+              year,
+              publisher,
+              copyright,
+            }
           );
+      } catch (coverConversionError) {
+        /*
+         * Mobile fallback:
+         * convert to a real 320 kbps MP3 without artwork.
+         * We never rename the original M4A/AAC bytes as MP3.
+         */
+        console.warn(
+          "Artwork conversion failed. Retrying audio-only MP3:",
+          coverConversionError
+        );
+
+        setStage(
+          "Converting to 320 kbps MP3 without artwork...",
+          0
+        );
+
+        taggedData =
+          await embedWithCover(
+            ff,
+            audioData,
+            null,
+            {
+              title,
+              artist,
+              albumArtist,
+              album,
+              year,
+              publisher,
+              copyright,
+            }
+          );
+      } finally {
+        try {
+          ff.off(
+            "progress",
+            onFfmpegProgress
+          );
+        } catch {
+          // Ignore listener cleanup errors.
+        }
       }
 
       if (
@@ -1658,6 +2013,21 @@ const Player = () => {
         );
       }
 
+      /*
+       * COMPLETE
+       */
+      setStage(
+        "Finalizing download...",
+        100
+      );
+
+      await new Promise((resolve) =>
+        window.setTimeout(
+          resolve,
+          150
+        )
+      );
+
       downloadBlob(
         new Blob(
           [taggedData],
@@ -1667,33 +2037,35 @@ const Player = () => {
         ),
         filename
       );
+
+      setDownloadStatus(
+        "Download complete"
+      );
+      setDownloadProgress(100);
+      setDownloadEta(0);
     } catch (error) {
       console.error(
         "MP3 download/conversion failed:",
         error
       );
 
-      /*
-       * Never rename the original M4A/AAC bytes to .mp3.
-       * The requested output is a real MP3, so a conversion failure
-       * must be reported instead of creating a misleading file.
-       */
       const message =
-        String(error?.message || "");
+        String(
+          error?.message || ""
+        );
 
-      if (
+      setDownloadError(
         /memory|allocation|out of memory/i.test(
           message
         )
-      ) {
-        alert(
-          "This song is too large to convert to 320 kbps MP3 in this mobile browser. Please try again on a desktop browser."
-        );
-      } else {
-        alert(
-          "MP3 conversion failed. Please try the download again."
-        );
-      }
+          ? "This song is too large to convert to 320 kbps MP3 in this mobile browser."
+          : "MP3 conversion failed. Please try the download again."
+      );
+
+      setDownloadStatus(
+        "Download failed"
+      );
+      setDownloadEta(0);
     } finally {
       setIsDownloading(false);
     }
@@ -1772,6 +2144,172 @@ const Player = () => {
         lg:bottom-0
       "
     >
+      {(
+        isDownloading ||
+        downloadStatus ===
+          "Download complete" ||
+        downloadStatus ===
+          "Download failed"
+      ) && (
+        <div
+          className={`
+            mx-auto
+            mb-2
+            w-[calc(100%-1rem)]
+            max-w-2xl
+            overflow-hidden
+            rounded-2xl
+            border
+            p-3
+            shadow-2xl
+            backdrop-blur-2xl
+            ${
+              isDark
+                ? "border-white/10 bg-black/85 text-white"
+                : "border-black/10 bg-white/95 text-black"
+            }
+          `}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className={`
+                flex
+                h-10
+                w-10
+                shrink-0
+                items-center
+                justify-center
+                rounded-full
+                ${
+                  downloadStatus ===
+                  "Download failed"
+                    ? "bg-red-500/15 text-red-500"
+                    : downloadStatus ===
+                        "Download complete"
+                      ? "bg-green-500/15 text-green-500"
+                      : "bg-red-500/15 text-red-500"
+                }
+              `}
+            >
+              <MdDownload
+                className={`
+                  text-xl
+                  ${
+                    isDownloading
+                      ? "animate-bounce"
+                      : ""
+                  }
+                `}
+              />
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm font-semibold">
+                  {downloadStatus ||
+                    "Downloading..."}
+                </p>
+
+                <span className="shrink-0 text-xs font-bold tabular-nums">
+                  {Math.round(
+                    downloadProgress
+                  )}%
+                </span>
+              </div>
+
+              <div
+                className={`
+                  mt-2
+                  h-1.5
+                  overflow-hidden
+                  rounded-full
+                  ${
+                    isDark
+                      ? "bg-white/10"
+                      : "bg-black/10"
+                  }
+                `}
+              >
+                <div
+                  className={`
+                    h-full
+                    rounded-full
+                    bg-red-500
+                    transition-[width]
+                    duration-200
+                    ${
+                      isDownloading
+                        ? "animate-pulse"
+                        : ""
+                    }
+                  `}
+                  style={{
+                    width: `${Math.max(
+                      0,
+                      Math.min(
+                        100,
+                        downloadProgress
+                      )
+                    )}%`,
+                  }}
+                />
+              </div>
+
+              <div
+                className={`
+                  mt-1.5
+                  flex
+                  flex-wrap
+                  items-center
+                  gap-x-3
+                  gap-y-1
+                  text-[11px]
+                  ${
+                    isDark
+                      ? "text-white/55"
+                      : "text-black/55"
+                  }
+                `}
+              >
+                <span>
+                  {formatDownloadSize(
+                    downloadBytes
+                  )}{" "}
+                  /{" "}
+                  {downloadTotalBytes
+                    ? formatDownloadSize(
+                        downloadTotalBytes
+                      )
+                    : "--"}
+                </span>
+
+                <span>
+                  {formatDownloadClock(
+                    downloadElapsed
+                  )}
+                </span>
+
+                {isDownloading &&
+                  downloadEta > 0 && (
+                    <span>
+                      ETA{" "}
+                      {formatDownloadClock(
+                        downloadEta
+                      )}
+                    </span>
+                  )}
+              </div>
+
+              {downloadError && (
+                <p className="mt-1 text-[11px] text-red-500">
+                  {downloadError}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div
         className={`
           relative
@@ -2639,39 +3177,55 @@ const Player = () => {
                   }
                   title={
                     isDownloading
-                      ? "Downloading..."
+                      ? `${Math.round(downloadProgress)}% downloaded`
                       : "Download"
                   }
                   aria-label={
                     isDownloading
-                      ? "Downloading"
+                      ? `Downloading ${Math.round(downloadProgress)} percent`
                       : "Download song"
                   }
-                  className="
+                  className={`
+                    relative
                     flex
                     h-10
-                    w-10
+                    min-w-10
                     items-center
                     justify-center
+                    gap-1
                     rounded-full
+                    px-2
                     opacity-75
                     transition-all
                     hover:scale-110
                     hover:bg-white/10
                     hover:opacity-100
                     disabled:cursor-not-allowed
-                  "
+                    ${
+                      isDownloading
+                        ? "text-red-500"
+                        : ""
+                    }
+                  `}
                 >
                   <MdDownload
                     className={`
                       text-xl
                       ${
                         isDownloading
-                          ? "animate-pulse opacity-50"
+                          ? "animate-bounce"
                           : ""
                       }
                     `}
                   />
+
+                  {isDownloading && (
+                    <span className="text-[10px] font-bold tabular-nums">
+                      {Math.round(
+                        downloadProgress
+                      )}%
+                    </span>
+                  )}
                 </button>
               </div>
 
