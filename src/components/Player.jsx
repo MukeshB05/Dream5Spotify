@@ -132,6 +132,14 @@ const bytesFromBuffer = (buffer) =>
     ? buffer
     : new Uint8Array(buffer);
 
+const ffDelete = async (ff, filename) => {
+  try {
+    await ff.deleteFile(filename);
+  } catch {
+    // Ignore cleanup errors.
+  }
+};
+
 const embedWithCover = async (
   ff,
   audioData,
@@ -139,54 +147,11 @@ const embedWithCover = async (
   meta
 ) => {
   const inputName = "input.media";
+  const audioMp3Name = "audio-320.mp3";
   const coverName = "cover.jpg";
   const outputName = "output.mp3";
 
-  await ff.writeFile(
-    inputName,
-    bytesFromBuffer(audioData)
-  );
-
-  const args = [
-    "-i",
-    inputName,
-  ];
-
-  if (coverData?.length) {
-    await ff.writeFile(
-      coverName,
-      bytesFromBuffer(coverData)
-    );
-
-    args.push(
-      "-i",
-      coverName,
-      "-map",
-      "0:a:0",
-      "-map",
-      "1:v:0",
-      "-c:a",
-      "libmp3lame",
-      "-b:a",
-      "320k",
-      "-c:v",
-      "mjpeg",
-      "-disposition:v:0",
-      "attached_pic"
-    );
-  } else {
-    args.push(
-      "-map",
-      "0:a:0",
-      "-vn",
-      "-c:a",
-      "libmp3lame",
-      "-b:a",
-      "320k"
-    );
-  }
-
-  args.push(
+  const metadataArgs = [
     "-map_metadata",
     "-1",
     "-id3v2_version",
@@ -195,73 +160,187 @@ const embedWithCover = async (
     "1",
     "-metadata",
     `title=${sanitizeMetadata(
-        stripMediaExtensions(meta.title),
-        "Unknown Song"
-      )}`,
+      stripMediaExtensions(meta?.title),
+      "Unknown Song"
+    )}`,
     "-metadata",
-    `artist=${sanitizeMetadata(meta.artist, "Unknown Artist")}`,
+    `artist=${sanitizeMetadata(
+      meta?.artist,
+      "Unknown Artist"
+    )}`,
     "-metadata",
-    `album=${sanitizeMetadata(meta.album, "Unknown Album")}`,
+    `album=${sanitizeMetadata(
+      meta?.album,
+      "Unknown Album"
+    )}`,
     "-metadata",
-    `album_artist=${sanitizeMetadata(meta.albumArtist, meta.artist || "Unknown Artist")}`
-  );
+    `album_artist=${sanitizeMetadata(
+      meta?.albumArtist,
+      meta?.artist || "Unknown Artist"
+    )}`,
+  ];
 
-  if (meta.year) {
-    args.push(
+  if (meta?.year) {
+    metadataArgs.push(
       "-metadata",
       `date=${sanitizeMetadata(meta.year)}`
     );
   }
 
-  if (meta.publisher) {
-    args.push(
+  if (meta?.publisher) {
+    metadataArgs.push(
       "-metadata",
       `publisher=${sanitizeMetadata(meta.publisher)}`
     );
   }
 
-  if (meta.copyright) {
-    args.push(
+  if (meta?.copyright) {
+    metadataArgs.push(
       "-metadata",
       `copyright=${sanitizeMetadata(meta.copyright)}`
     );
   }
 
-  if (coverData?.length) {
-    args.push(
-      "-metadata:s:v:0",
-      "title=Album cover",
-      "-metadata:s:v:0",
-      "comment=Cover (front)"
+  await ffDelete(ff, inputName);
+  await ffDelete(ff, audioMp3Name);
+  await ffDelete(ff, coverName);
+  await ffDelete(ff, outputName);
+
+  try {
+    /*
+     * PASS 1
+     * Always create a real MP3 first.
+     * This is important on mobile browsers: artwork muxing
+     * must never prevent the audio conversion from succeeding.
+     */
+    await ff.writeFile(
+      inputName,
+      bytesFromBuffer(audioData)
     );
-  }
 
-  args.push(
-    "-f",
-    "mp3",
-    outputName
-  );
+    await ff.exec([
+      "-y",
+      "-i",
+      inputName,
+      "-map",
+      "0:a:0",
+      "-vn",
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "320k",
+      "-ar",
+      "44100",
+      "-ac",
+      "2",
+      ...metadataArgs,
+      "-f",
+      "mp3",
+      audioMp3Name,
+    ]);
 
-  await ff.exec(args);
+    /*
+     * Remove the original M4A/AAC bytes before artwork muxing.
+     * This reduces peak memory usage on Android/mobile browsers.
+     */
+    await ffDelete(ff, inputName);
 
-  const output = await ff.readFile(outputName);
-  const result = new Uint8Array(output);
+    /*
+     * No artwork: the first-pass MP3 is already the final file.
+     */
+    if (!coverData?.length) {
+      const output = await ff.readFile(
+        audioMp3Name
+      );
 
-  for (const file of [
-    inputName,
-    coverName,
-    outputName,
-  ]) {
-    try {
-      await ff.deleteFile(file);
-    } catch {
-      // Ignore cleanup errors.
+      const result = new Uint8Array(output);
+      await ffDelete(ff, audioMp3Name);
+
+      return result;
     }
+
+    /*
+     * PASS 2
+     * Attach album artwork without re-encoding the MP3 audio.
+     */
+    await ff.writeFile(
+      coverName,
+      bytesFromBuffer(coverData)
+    );
+
+    try {
+      await ff.exec([
+        "-y",
+        "-i",
+        audioMp3Name,
+        "-i",
+        coverName,
+        "-map",
+        "0:a:0",
+        "-map",
+        "1:v:0",
+        "-c:a",
+        "copy",
+        "-c:v",
+        "mjpeg",
+        "-disposition:v:0",
+        "attached_pic",
+        "-map_metadata",
+        "0",
+        "-id3v2_version",
+        "3",
+        "-write_id3v1",
+        "1",
+        "-metadata:s:v:0",
+        "title=Album cover",
+        "-metadata:s:v:0",
+        "comment=Cover (front)",
+        "-f",
+        "mp3",
+        outputName,
+      ]);
+
+      const output = await ff.readFile(
+        outputName
+      );
+
+      const result = new Uint8Array(output);
+
+      await ffDelete(ff, audioMp3Name);
+      await ffDelete(ff, coverName);
+      await ffDelete(ff, outputName);
+
+      return result;
+    } catch (coverError) {
+      /*
+       * Mobile fallback:
+       * artwork failed, but audio-320.mp3 is already valid.
+       */
+      console.warn(
+        "Artwork muxing failed; returning valid 320 kbps MP3 without artwork:",
+        coverError
+      );
+
+      const output = await ff.readFile(
+        audioMp3Name
+      );
+
+      const result = new Uint8Array(output);
+
+      await ffDelete(ff, audioMp3Name);
+      await ffDelete(ff, coverName);
+      await ffDelete(ff, outputName);
+
+      return result;
+    }
+  } catch (error) {
+    await ffDelete(ff, inputName);
+    await ffDelete(ff, audioMp3Name);
+    await ffDelete(ff, coverName);
+    await ffDelete(ff, outputName);
+    throw error;
   }
-
-  return result;
 };
-
 
 /* =========================================================
    DOWNLOAD FORMATTERS
@@ -1943,62 +2022,23 @@ const Player = () => {
       let taggedData;
 
       try {
-        /*
-         * First attempt:
-         * 320 kbps MP3 + embedded album artwork.
-         */
-        taggedData =
-          await embedWithCover(
-            ff,
-            audioData,
-            coverData,
-            {
-              title,
-              artist,
-              albumArtist,
-              album,
-              year,
-              publisher,
-              copyright,
-            }
-          );
-      } catch (coverConversionError) {
-        /*
-         * Mobile fallback:
-         * convert to a real 320 kbps MP3 without artwork.
-         * We never rename the original M4A/AAC bytes as MP3.
-         */
-        console.warn(
-          "Artwork conversion failed. Retrying audio-only MP3:",
-          coverConversionError
+        taggedData = await embedWithCover(
+          ff,
+          audioData,
+          coverData,
+          {
+            title,
+            artist,
+            albumArtist,
+            album,
+            year,
+            publisher,
+            copyright,
+          }
         );
-
-        setStage(
-          "Converting to 320 kbps MP3 without artwork...",
-          0
-        );
-
-        taggedData =
-          await embedWithCover(
-            ff,
-            audioData,
-            null,
-            {
-              title,
-              artist,
-              albumArtist,
-              album,
-              year,
-              publisher,
-              copyright,
-            }
-          );
       } finally {
         try {
-          ff.off(
-            "progress",
-            onFfmpegProgress
-          );
+          ff.off("progress", onFfmpegProgress);
         } catch {
           // Ignore listener cleanup errors.
         }
