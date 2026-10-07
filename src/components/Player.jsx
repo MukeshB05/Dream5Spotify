@@ -2078,11 +2078,11 @@ const Player = () => {
         filename
       );
 
-      setDownloadStatus(
-        "Download complete"
-      );
+      // Download is complete: do not keep the progress notification on screen.
       setDownloadProgress(100);
       setDownloadEta(0);
+      setDownloadStatus("");
+      setDownloadError("");
     } catch (error) {
       console.error(
         "MP3 download/conversion failed:",
@@ -2184,13 +2184,7 @@ const Player = () => {
         lg:bottom-0
       "
     >
-      {(
-        isDownloading ||
-        downloadStatus ===
-          "Download complete" ||
-        downloadStatus ===
-          "Download failed"
-      ) && (
+      {isDownloading && (
         <div
           className={`
             mx-auto
@@ -2246,15 +2240,39 @@ const Player = () => {
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
                 <p className="truncate text-sm font-semibold">
-                  {downloadStatus ||
-                    "Downloading..."}
+                  {downloadStatus || "Downloading..."}
                 </p>
 
                 <span className="shrink-0 text-xs font-bold tabular-nums">
-                  {Math.round(
-                    downloadProgress
-                  )}%
+                  {Math.round(downloadProgress)}%
                 </span>
+              </div>
+
+              <div
+                className={`
+                  mt-1
+                  flex
+                  items-center
+                  justify-between
+                  gap-2
+                  text-xs
+                  font-medium
+                  ${
+                    isDark
+                      ? "text-white/70"
+                      : "text-black/65"
+                  }
+                `}
+              >
+                <span className="truncate">
+                  Downloaded: {formatDownloadSize(downloadBytes)} / {downloadTotalBytes ? formatDownloadSize(downloadTotalBytes) : "--"}
+                </span>
+
+                {downloadElapsed > 0 && (
+                  <span className="shrink-0 tabular-nums">
+                    {formatDownloadClock(downloadElapsed)}
+                  </span>
+                )}
               </div>
 
               <div
@@ -2295,50 +2313,21 @@ const Player = () => {
                 />
               </div>
 
-              <div
-                className={`
-                  mt-1.5
-                  flex
-                  flex-wrap
-                  items-center
-                  gap-x-3
-                  gap-y-1
-                  text-[11px]
-                  ${
-                    isDark
-                      ? "text-white/55"
-                      : "text-black/55"
-                  }
-                `}
-              >
-                <span>
-                  {formatDownloadSize(
-                    downloadBytes
-                  )}{" "}
-                  /{" "}
-                  {downloadTotalBytes
-                    ? formatDownloadSize(
-                        downloadTotalBytes
-                      )
-                    : "--"}
-                </span>
-
-                <span>
-                  {formatDownloadClock(
-                    downloadElapsed
-                  )}
-                </span>
-
-                {isDownloading &&
-                  downloadEta > 0 && (
-                    <span>
-                      ETA{" "}
-                      {formatDownloadClock(
-                        downloadEta
-                      )}
-                    </span>
-                  )}
-              </div>
+              {isDownloading && downloadEta > 0 && (
+                <div
+                  className={`
+                    mt-1.5
+                    text-[11px]
+                    ${
+                      isDark
+                        ? "text-white/55"
+                        : "text-black/55"
+                    }
+                  `}
+                >
+                  ETA {formatDownloadClock(downloadEta)}
+                </div>
+              )}
 
               {downloadError && (
                 <p className="mt-1 text-[11px] text-red-500">
