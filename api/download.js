@@ -4,6 +4,7 @@ const ALLOWED_HOSTS = [
   "saavncdn.com",
   "jiosaavn.com",
   "jiosaavndev.vercel.app",
+  "aac.saavncdn.com",
   "scdn.co",
 ];
 
