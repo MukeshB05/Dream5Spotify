@@ -1,48 +1,38 @@
-import { useContext, useMemo, useState } from "react";
 import { GoPlay } from "react-icons/go";
-import { FaSpotify } from "react-icons/fa";
+import { useContext, useState } from "react";
+import MusicContext from "../context/MusicContext";
 import he from "he";
 
-import MusicContext from "../context/MusicContext";
-
-/* =========================================================
-   HELPERS
-========================================================= */
-
 const safeDecode = (value) => {
-  if (value === null || value === undefined) return "";
-
   try {
-    return he.decode(String(value));
+    return he.decode(String(value ?? ""));
   } catch {
-    return String(value);
+    return String(value ?? "");
   }
 };
 
-const resolveImage = (image) => {
-  if (typeof image === "string" && image.trim()) {
-    return image.trim();
-  }
+const formatTime = (value) => {
+  const seconds = Math.max(0, Math.floor(Number(value) || 0));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
+
+const getImageUrl = (image) => {
+  if (!image) return "/Unknown.png";
+  if (typeof image === "string") return image;
 
   if (Array.isArray(image)) {
     for (let i = image.length - 1; i >= 0; i -= 1) {
       const item = image[i];
-
-      if (typeof item === "string" && item.trim()) {
-        return item.trim();
-      }
-
-      if (item && typeof item === "object") {
-        const url = item.url || item.link || item.src;
-
-        if (typeof url === "string" && url.trim()) {
-          return url.trim();
-        }
-      }
+      const url =
+        typeof item === "string"
+          ? item
+          : item?.url || item?.link || item?.src;
+      if (url) return url;
     }
+    return "/Unknown.png";
   }
 
-  if (image && typeof image === "object") {
+  if (typeof image === "object") {
     return image.url || image.link || image.src || "/Unknown.png";
   }
 
@@ -57,353 +47,140 @@ const getArtistNames = (artists) => {
       .join(", ");
   }
 
-  if (Array.isArray(artists?.all)) {
-    return artists.all
-      .map((artist) => artist?.name)
-      .filter(Boolean)
-      .join(", ");
-  }
-
   if (Array.isArray(artists)) {
     return artists
-      .map((artist) =>
-        typeof artist === "string"
-          ? artist
-          : artist?.name
-      )
+      .map((artist) => artist?.name || artist)
       .filter(Boolean)
       .join(", ");
   }
 
-  if (typeof artists === "string") {
-    return artists;
-  }
+  if (typeof artists === "string") return artists;
 
-  return "";
+  return "Unknown Artist";
 };
 
-const formatTime = (value) => {
-  const seconds = Math.max(
-    0,
-    Math.floor(Number(value) || 0)
-  );
-
-  const minutes = Math.floor(seconds / 60);
-  const remaining = seconds % 60;
-
-  return `${minutes}:${String(remaining).padStart(2, "0")}`;
-};
-
-const normalizeSpotifyUrl = (value) => {
-  const raw = String(value || "").trim();
-
-  if (!raw) return "";
-
-  if (
-    raw.startsWith("https://open.spotify.com/") ||
-    raw.startsWith("http://open.spotify.com/")
-  ) {
-    return raw;
-  }
-
-  if (raw.startsWith("spotify:")) {
-    const parts = raw.split(":");
-
-    if (parts.length >= 3) {
-      return `https://open.spotify.com/${parts[1]}/${parts[2]}`;
-    }
-  }
-
-  if (raw.startsWith("spotify://")) {
-    const parts = raw
-      .replace("spotify://", "")
-      .split("/");
-
-    if (parts.length >= 2) {
-      return `https://open.spotify.com/${parts[0]}/${parts[1]}`;
-    }
-  }
-
-  return "";
-};
-
-const getSpotifyUrl = (song, explicitUrl) => {
-  const candidates = [
-    explicitUrl,
-
-    song?.spotifyUrl,
-    song?.spotify_url,
-    song?.spotifyLink,
-    song?.spotify_link,
-
-    song?.external_urls?.spotify,
-    song?.externalUrls?.spotify,
-
-    song?.links?.spotify,
-    song?.urls?.spotify,
-
-    song?.spotify?.url,
-    song?.spotify?.uri,
-    song?.spotify?.spotifyUrl,
-    song?.spotify?.spotify_url,
-
-    song?.spotify?.external_urls?.spotify,
-    song?.spotify?.externalUrls?.spotify,
-  ];
-
-  for (const value of candidates) {
-    const normalized = normalizeSpotifyUrl(value);
-
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return "";
-};
-
-/* =========================================================
-   SONGS LIST
-========================================================= */
-
-const SongsList = ({
-  name,
-  title,
-  artists,
-  duration,
-  downloadUrl,
-  image,
-  id,
-  song,
-  songs,
-  onPlay,
-  spotifyUrl: explicitSpotifyUrl,
-  className = "",
-}) => {
-  const musicContext = useContext(MusicContext) || {};
-  const {
-    playMusic,
-    currentSong,
-    isPlaying,
-  } = musicContext;
-
+const SongsList = (props) => {
   const [hovering, setHovering] = useState(false);
+  const { playMusic } = useContext(MusicContext) || {};
 
-  const item = song || {
-    id,
-    name: name || title,
+  const {
+    name,
+    title,
     artists,
+    artist,
     duration,
-    downloadUrl,
     image,
-  };
+    id,
+    song,
+    songs,
+    songList,
+    onPlay,
+  } = props;
 
-  const songName = useMemo(
-    () =>
-      safeDecode(
-        item?.name ||
-          item?.title ||
-          name ||
-          title ||
-          "Unknown Song"
-      ),
-    [item?.name, item?.title, name, title]
-  );
+  /*
+   * IMPORTANT:
+   * Older pages pass the complete queue as `song={list}`.
+   * Newer pages may pass it as `songs` or `songList`.
+   *
+   * Never treat an array as the current song.
+   */
+  const queue = Array.isArray(song)
+    ? song
+    : Array.isArray(songs)
+      ? songs
+      : Array.isArray(songList)
+        ? songList
+        : [];
 
-  const artistText = useMemo(
-    () => getArtistNames(item?.artists || artists),
-    [item?.artists, artists]
-  );
+  const item =
+    song && !Array.isArray(song) && typeof song === "object"
+      ? song
+      : props;
 
-  const imageSrc = useMemo(
-    () =>
-      resolveImage(
-        item?.image ||
-          image
-      ),
-    [item?.image, image]
-  );
+  const songName =
+    item?.name ||
+    item?.title ||
+    item?.songName ||
+    name ||
+    title ||
+    "Unknown Song";
 
-  const songDuration = useMemo(
-    () =>
-      formatTime(
-        item?.duration ??
-          duration
-      ),
-    [item?.duration, duration]
-  );
+  const artistData =
+    item?.artists ||
+    item?.artist ||
+    artists ||
+    artist;
 
-  const spotifyUrl = useMemo(
-    () => getSpotifyUrl(item, explicitSpotifyUrl),
-    [item, explicitSpotifyUrl]
-  );
+  const artistNames = getArtistNames(artistData);
+  const imageUrl = getImageUrl(item?.image || image);
 
-  const isCurrent =
-    currentSong?.id != null &&
-    item?.id != null &&
-    String(currentSong.id) === String(item.id);
-
-  const handlePlay = () => {
-    const queue =
-      Array.isArray(songs) && songs.length
-        ? songs
-        : undefined;
+  const handleClick = async (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
 
     if (typeof onPlay === "function") {
-      onPlay(item);
+      onPlay(item, queue);
       return;
     }
 
-    if (typeof playMusic === "function") {
-      playMusic(item, queue);
+    if (typeof playMusic !== "function") {
+      console.error("MusicContext.playMusic is not available.");
+      return;
     }
-  };
 
-  const handleKeyDown = (event) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      handlePlay();
-    }
+    /*
+     * Passing the complete list is what enables:
+     * Album -> all album songs -> Next/Previous
+     * Artist -> all artist songs -> Next/Previous
+     * Playlist -> all playlist songs -> Next/Previous
+     * Favourite -> all favourite songs -> Next/Previous
+     *
+     * With no queue, MusicContext intentionally creates a one-song queue.
+     */
+    await playMusic(item, queue.length ? queue : undefined);
   };
 
   return (
-    <div
-      className={`
-        group relative flex w-full min-w-0 items-center
-        gap-3 sm:gap-4
-        px-3 py-2.5 sm:px-4
-        bg-[var(--card-bg)]
-        text-[var(--text-primary)]
-        transition-colors
-        hover:bg-[var(--secondary-bg)]
-        ${isCurrent ? "bg-[var(--secondary-bg)]" : ""}
-        ${className}
-      `}
+    <button
+      type="button"
+      onClick={handleClick}
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+      className="overflow-clip h-[3.5rem] w-full song-item flex justify-between items-center p-2 song-info"
+      aria-label={`Play ${safeDecode(songName)}`}
     >
-      {/* =================================================
-          PLAY / COVER
-      ================================================= */}
-      <div
-        className="
-          relative h-14 w-14 shrink-0
-          overflow-hidden rounded-lg
-          bg-[var(--secondary-bg)]
-          cursor-pointer
-        "
-        onClick={handlePlay}
-        onKeyDown={handleKeyDown}
-        role="button"
-        tabIndex={0}
-        aria-label={`Play ${songName}`}
-      >
+      <div className="relative cursor-pointer">
         <img
-          src={imageSrc}
-          alt={songName}
-          className="h-full w-full object-cover"
-          loading="lazy"
-          draggable="false"
+          src={imageUrl}
+          alt=""
+          className="w-[5rem] object-cover transition-all duration-700"
           onError={(event) => {
-            event.currentTarget.onerror = null;
             event.currentTarget.src = "/Unknown.png";
           }}
         />
-
-        <div
-          className={`
-            absolute inset-0 flex items-center justify-center
-            bg-black/45
-            transition-opacity duration-200
-            ${
-              hovering || isCurrent
-                ? "opacity-100"
-                : "opacity-0"
-            }
-          `}
-          onMouseEnter={() => setHovering(true)}
-          onMouseLeave={() => setHovering(false)}
-        >
-          <GoPlay className="text-2xl text-white" />
-        </div>
+        {hovering && (
+          <GoPlay className="transition-all duration-700 absolute inset-0 hidden lg:flex items-center justify-center w-[2.35rem] h-[2.35rem]  opacity-65 backdrop-brightness-[0.6] icon" />
+        )}
       </div>
 
-      {/* =================================================
-          SONG INFO
-      ================================================= */}
-      <div
-        className="
-          min-w-0 flex-1 cursor-pointer
-        "
-        onClick={handlePlay}
-        onKeyDown={handleKeyDown}
-        role="button"
-        tabIndex={0}
-      >
-        <div
-          className="
-            truncate text-sm sm:text-base
-            font-semibold
-          "
-          title={songName}
-        >
-          {songName}
-        </div>
-
-        <div
-          className="
-            mt-0.5 truncate text-xs sm:text-sm
-            text-[var(--text-secondary)]
-          "
-          title={artistText}
-        >
-          {artistText || "Unknown Artist"}
-        </div>
+      <div className="flex w-full pl-5 ">
+        <h3 className="overflow-clip text-[0.75rem] lg:text-[0.875rem] h-[1.3rem] font-medium">
+          {safeDecode(songName)}
+        </h3>
       </div>
 
-      {/* =================================================
-          SPOTIFY — ONLY ONE ICON
-      ================================================= */}
-      {spotifyUrl && (
-        <a
-          href={spotifyUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="
-            flex h-10 w-10 shrink-0
-            items-center justify-center
-            rounded-full
-            text-[#1DB954]
-            transition
-            hover:bg-[#1DB954]/10
-            hover:scale-105
-            active:scale-95
-          "
-          title="Open in Spotify"
-          aria-label={`Open ${songName} in Spotify`}
-          onClick={(event) => {
-            event.stopPropagation();
-          }}
-        >
-          <FaSpotify className="text-2xl" />
-        </a>
-      )}
+      <div className="flex w-full">
+        <p className="text-[0.60rem] lg:text-[0.75rem] h-[1rem] mr-3 overflow-clip lg:w-auto">
+          {safeDecode(artistNames)}
+        </p>
+      </div>
 
-      {/* =================================================
-          DURATION
-      ================================================= */}
-      <span
-        className="
-          min-w-[42px]
-          shrink-0
-          text-right
-          text-xs sm:text-sm
-          tabular-nums
-          text-[var(--text-secondary)]
-        "
-        title="Duration"
-      >
-        {songDuration}
-      </span>
-    </div>
+      <div className="song-duration mr-2">
+        <span className="text-[0.60rem] lg:text-[0.75rem]">
+          {formatTime(item?.duration ?? duration)}
+        </span>
+      </div>
+    </button>
   );
 };
 
